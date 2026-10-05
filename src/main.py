@@ -1,11 +1,12 @@
 import sys
+from array import array
 from pathlib import Path
 
 
-RED = "\033[31m"
-# GREEN = "\033[32m"
-BLUE = "\033[34m"
-RESET = "\033[0m"
+# RED = "\033[31m"
+# # GREEN = "\033[32m"
+# BLUE = "\033[34m"
+# RESET = "\033[0m"
 
 def read_lines(path):
     """Read raw bytes and split on LF, preserving CR characters."""
@@ -30,25 +31,50 @@ def myers_diff(a, b):
 
     Works with any sequences, including bytes lines and
     Unicode characters.
+
+    The trace is kept as a list of packed integer arrays instead of
+    dicts, so memory stays proportional to the number of diagonals
+    visited rather than being inflated by per-entry dictionary
+    overhead.
     """
     n, m = len(a), len(b)
-    v = {1: 0}
-    trace = []
+
+    if n == 0:
+        return [("INSERT", value) for value in b]
+
+    if m == 0:
+        return [("DELETE", value) for value in a]
+
+    offset = n + m
+
+    # v[k] is the furthest x reached on diagonal k, stored at
+    # v[k + offset].
+    v = [0] * (2 * offset + 3)
+    v[offset + 1] = 0
+
+    # trace[d] holds the v values for k in [-(d - 1), d - 1] before
+    # iteration d, indexed by (k + d - 1) // 2.
+    trace = [array("i", [0])]
 
     for d in range(n + m + 1):
-        trace.append(v.copy())
+        if d:
+            trace.append(
+                array("i", v[offset - d + 1 : offset + d : 2])
+            )
 
         for k in range(-d, d + 1, 2):
+            index = k + offset
+
             if (
                 k == -d
                 or (
                     k != d
-                    and v.get(k - 1, -1) < v.get(k + 1, -1)
+                    and v[index - 1] < v[index + 1]
                 )
             ):
-                x = v.get(k + 1, 0)
+                x = v[index + 1]
             else:
-                x = v.get(k - 1, 0) + 1
+                x = v[index - 1] + 1
 
             y = x - k
 
@@ -57,7 +83,7 @@ def myers_diff(a, b):
                 x += 1
                 y += 1
 
-            v[k] = x
+            v[index] = x
 
             if x >= n and y >= m:
                 return backtrack(trace, a, b)
@@ -71,21 +97,21 @@ def backtrack(trace, a, b):
     result = []
 
     for d in range(len(trace) - 1, -1, -1):
-        v = trace[d]
+        row = trace[d]
         k = x - y
 
         if (
             k == -d
             or (
                 k != d
-                and v.get(k - 1, -1) < v.get(k + 1, -1)
+                and row[(k + d - 2) // 2] < row[(k + d) // 2]
             )
         ):
             previous_k = k + 1
         else:
             previous_k = k - 1
 
-        previous_x = v.get(previous_k, 0)
+        previous_x = row[(previous_k + d - 1) // 2]
         previous_y = previous_x - previous_k
 
         while x > previous_x and y > previous_y:
@@ -221,8 +247,8 @@ def run_diff(old_lines, new_lines, highlight=False):
 def main():
     if len(sys.argv) != 4:
         print(
-            "Usage: python mydiff.py lines A B\n"
-            "   or: python mydiff.py highlight A B",
+            "Usage: python main.py lines A B\n"
+            "   or: python main.py highlight A B",
             file=sys.stderr,
         )
         return 2
